@@ -1,8 +1,8 @@
 from gym import spaces
 import numpy as np
 import torch
-from dqn.model import DuelingDQN
-from dqn.replay_buffer import ReplayBuffer
+from model import DuelingDQN
+from replay_buffer import ReplayBuffer
 
 class DQNAgent:
     def __init__(
