@@ -4,9 +4,6 @@ import torch
 from dqn.model import DuelingDQN
 from dqn.replay_buffer import ReplayBuffer
 
-# device = "cuda"
-
-
 class DQNAgent:
     def __init__(
         self,
@@ -30,17 +27,16 @@ class DQNAgent:
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = DuelingDQN(observation_space,action_space).to(self.device)
-#         self.policy_model = QNN(observation_space,action_space).to(device)
+        self.target_model = DuelingDQN(observation_space,action_space).to(self.device)
         self.optimizer = torch.optim.Adam(self.model.parameters(),lr)
         self.loss= torch.nn.MSELoss()
         self.r_buffer = replay_buffer
         self.batch_size = batch_size
         self.gamma = gamma
-#         self.use_ddqn = use_double_dqn
-#         device ='cuda'
-        print(self.device)
-#         self.target_model.load_state_dict(self.policy_model.state_dict())
-#         self.target_model.eval()
+        self.use_ddqn = use_double_dqn
+
+        self.target_model.load_state_dict(self.model.state_dict())
+        self.target_model.eval()
         
 
     def optimise_td_loss(self):
@@ -60,25 +56,26 @@ class DQNAgent:
         self.optimizer.zero_grad()
         
         idx = np.arange(self.batch_size)
-        q_state = (self.model(states)[idx,actions]).double()
-        q_nstate = torch.max(self.model(n_states),1)[0]#.detach()
+        q_policy_s = (self.model(states)[idx,actions]).double()
+        q_target_s_ = (self.target_model(n_states)).detach()
+        max_a = torch.argmax(self.model(n_states),1)
 
-        q_nstate[dones]=0.0
-        q_t = (rewards+(self.gamma*q_nstate)).double()
+        q_target_s_[dones]=0.0
+        q_target_s = (rewards+(self.gamma*q_target_s_[idx,max_a])).double()
         
-        loss = self.loss(q_t,q_state).to(self.device)
+        loss = self.loss(q_target_s,q_policy_s).to(self.device)
         loss.backward()
         self.optimizer.step()
 
         return loss.item()
     
 
-#     def update_target_network(self):
-#         """
-#         Update the target Q-network by copying the weights from the current Q-network
-#         """
+    def update_target_network(self):
+        """
+        Update the target Q-network by copying the weights from the current Q-network
+        """
         
-#         self.target_model.load_state_dict(self.policy_model.state_dict())
+        self.target_model.load_state_dict(self.model.state_dict())
         
 
     def act(self, state: np.ndarray):
@@ -92,15 +89,14 @@ class DQNAgent:
         s = np.copy(state)
         s= torch.from_numpy(s).float().to(self.device)
         s = s.unsqueeze(0)
-#         print(s.shape)
         q_out = self.model(s).to('cpu').detach().numpy()
         return np.argmax(q_out)
     
         
-#     def save_models(self,env_name):
-#         torch.save(self.policy_model.state_dict(), f'Policy network {env_name}')
+    def save_model(self,fname):
+        torch.save(self.model.state_dict(),fname)
 #         torch.save(self.target_model.state_dict(), f'Target network {env_name}')
         
-#     def load_models(self,env_name):
-#         self.policy_model.load_state_dict(torch.load(f'Policy network {env_name}'))
+    def load_model(self,fname):
+        self.model.load_state_dict(torch.load(fname))
 #         self.target_model.load_state_dict(torch.load(f'Target network {env_name}'))
