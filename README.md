@@ -1,8 +1,8 @@
 # MiniHack-the-Planet
 
 This project requires the use of nethack and minihack, which can be installed following the steps at:
-https://github.com/facebookresearch/nle
-https://github.com/facebookresearch/minihack
+- https://github.com/facebookresearch/nle
+- https://github.com/facebookresearch/minihack
 
 
 The following python packages are required to be installed for both the DDQN and PPO agents:
