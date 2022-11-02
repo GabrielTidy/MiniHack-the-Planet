@@ -24,12 +24,7 @@ In order to run and compile the 3DQN Agent follow the following steps (assuming 
 The PPO files require the following python packages to be installed:
   - os
   - datetime
-<<<<<<< Updated upstream
-  - matplotlib
-  - torch
   - tensorboard
-=======
->>>>>>> Stashed changes
 
 Once these have been installed, run the files from the terminal while in the PPO folder using the command
   python3 ppo_[name].py
