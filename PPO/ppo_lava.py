@@ -223,6 +223,7 @@ def test_policy(env, actor_critic, savedir, deterministic=True):
         plt.show()
         animation.save(savedir + ".gif", dpi=300, writer=PillowWriter(fps=10))
         print("Video saved to path: " + savedir + ".gif")
+        plt.close(fig)
     
     return reward_sum
 

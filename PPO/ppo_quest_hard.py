@@ -15,23 +15,25 @@ from matplotlib.animation import FuncAnimation, PillowWriter
 ### Hyperparameters ###
 
 #nethack minhack environment
-ENVIRONMENT_NAME = "MiniHack-Room-15x15-v0"
-OBSERVATION_KEYS = ("chars", "blstats")
-TEST_OBSERVATION_KEYS = ("chars", "blstats", "pixel")
+ENVIRONMENT_NAME = "MiniHack-Quest-Hard-v0"
+OBSERVATION_KEYS = ("chars_crop", "message")
+TEST_OBSERVATION_KEYS = ("chars_crop", "message", "pixel")
 ACTION_KEYS = (nethack.CompassDirection.N,
         nethack.CompassDirection.E,
         nethack.CompassDirection.S,
-        nethack.CompassDirection.W)
+        nethack.CompassDirection.W,
+        nethack.Command.OPEN,
+        nethack.Command.PICKUP,
+        nethack.Command.QUAFF,
+        nethack.Command.ZAP,
+        nethack.Command.FIRE,
+        nethack.Command.RUSH)
 
 #environment rewards
-PENALTY_STEP = -0.01
-PENALTY_TIME = 0
-REWARD_WIN = 1
-REWARD_LOSE = -1
-
-#character IDs of elements used in observation processing
-PLAYER_ID = 64
-GOAL_ID = 62
+PENALTY_STEP = -0.1
+PENALTY_TIME = 0.0
+REWARD_WIN = 10
+REWARD_LOSE = -10
 
 #neural networks
 LEARNING_RATE = 1e-4
@@ -50,7 +52,7 @@ ENTROPY_LOSS_WEIGHT = 0.001
 BATCH_SIZE = 1024
 MINI_BATCH_SIZE = 64
 NUM_UPDATES_PER_PPO_EPOCH = 10
-MAX_PPO_EPOCHS = 1000
+MAX_PPO_EPOCHS = 5000
 
 #policy testing
 TESTING_INTERVAL = 10
@@ -60,11 +62,7 @@ TARGET_REWARD = REWARD_WIN
 
 #environment observation processing
 def process_observations(state):
-    player_pos = np.where(state[OBSERVATION_KEYS[0]] == PLAYER_ID)#the coordinates of the agent
-    player_pos = [player_pos[0][0], player_pos[1][0]]
-    goal_pos = np.where(state[OBSERVATION_KEYS[0]] == GOAL_ID)#the coordinates of the exit staircase
-    goal_pos = [goal_pos[0][0], goal_pos[1][0]]
-    return np.concatenate((player_pos, goal_pos))
+    return np.concatenate((state[OBSERVATION_KEYS[0]].flatten(), state[OBSERVATION_KEYS[1]]))
     
 
 #PPO functions
@@ -149,7 +147,7 @@ def ppo_update(actor_critic, policy_optimizer, states, action_log_probs, actions
 def test_policy(env, actor_critic, savedir, deterministic=True):
     reward_sum = 0.0
     raw_state = env.reset()
-    PIXEL_HISTORY = [raw_state["pixel"][30:310, 490:770]]
+    PIXEL_HISTORY = [raw_state["pixel"]]
     state = process_observations(raw_state)
     while True:
         state = torch.FloatTensor(state).unsqueeze(0)
@@ -161,7 +159,7 @@ def test_policy(env, actor_critic, savedir, deterministic=True):
             chosen_action = action_distribution.sample().cpu().numpy()
 
         next_state, reward, terminated, truncated, _ = env.step(chosen_action)
-        PIXEL_HISTORY.append(next_state["pixel"][30:310, 490:770])
+        PIXEL_HISTORY.append(next_state["pixel"])
         reward_sum += reward
 
         if terminated or truncated:

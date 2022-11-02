@@ -94,8 +94,8 @@ def positions(chars):
 
     return np.concatenate((player_pos, goal_pos, [num_monsters], jackal_pos, lichen_pos))
 
-def process_observations(obs):
-    return np.concatenate((positions(obs[OBSERVATION_KEYS[0]]), obs[OBSERVATION_KEYS[1]].flatten()))
+def process_observations(state):
+    return np.concatenate((positions(state[OBSERVATION_KEYS[0]]), state[OBSERVATION_KEYS[1]].flatten()))
     
 
 #PPO functions
@@ -222,6 +222,7 @@ def test_policy(env, actor_critic, savedir, deterministic=True):
         plt.show()
         animation.save(savedir + ".gif", dpi=300, writer=PillowWriter(fps=10))
         print("Video saved to path: " + savedir + ".gif")
+        plt.close(fig)
     
     return reward_sum
 

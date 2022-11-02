@@ -15,19 +15,25 @@ from matplotlib.animation import FuncAnimation, PillowWriter
 ### Hyperparameters ###
 
 #nethack minhack environment
-ENVIRONMENT_NAME = "MiniHack-MazeWalk-15x15-v0"
-OBSERVATION_KEYS = ("chars_crop", "message")
-TEST_OBSERVATION_KEYS = ("chars_crop", "message", "pixel")
+ENVIRONMENT_NAME = "MiniHack-MazeWalk-Mapped-15x15-v0"
+OBSERVATION_KEYS = ("chars", "chars_crop")
+TEST_OBSERVATION_KEYS = ("chars", "chars_crop", "pixel")
+OBS_CROP = 3
 ACTION_KEYS = (nethack.CompassDirection.N,
         nethack.CompassDirection.E,
         nethack.CompassDirection.S,
         nethack.CompassDirection.W)
 
 #environment rewards
-PENALTY_STEP = -0.1
+PENALTY_STEP = -1.0
 PENALTY_TIME = 0.0
 REWARD_WIN = 10
 REWARD_LOSE = -10
+NEW_POS_REWARD = 1.0
+
+#character IDs of elements used in observation processing
+PLAYER_ID = 64
+GOAL_ID = 62
 
 #neural networks
 LEARNING_RATE = 1e-4
@@ -50,14 +56,56 @@ MAX_PPO_EPOCHS = 5000
 
 #policy testing
 TESTING_INTERVAL = 10
+NUM_TESTS = 3
 TARGET_REWARD = REWARD_WIN
 
 ### End Hyperparameters ###
 
 
 #environment observation processing
-def process_observations(obs):
-    return obs[OBSERVATION_KEYS[0]].flatten()
+def process_observations(state, state_counts):
+    # cropped_chars = state[OBSERVATION_KEYS[0]][5:18, 32:45].flatten()
+    cropped_chars = state[OBSERVATION_KEYS[0]][5:18, 32:45]
+
+    player_pos = np.where(cropped_chars == PLAYER_ID)#the coordinates of the agent
+    player_pos = [player_pos[0][0], player_pos[1][0]]
+
+    # player_pos = np.where(state[OBSERVATION_KEYS[0]] == PLAYER_ID)#the coordinates of the agent
+    # player_pos = [player_pos[0][0], player_pos[1][0]]
+
+    # goal_pos = np.where(state[OBSERVATION_KEYS[0]] == GOAL_ID)#the coordinates of the exit staircase
+    # goal_pos = [goal_pos[0][0], goal_pos[1][0]]
+
+    player_view = state[OBSERVATION_KEYS[1]].flatten()
+
+    state_counts[player_pos[0]][player_pos[1]] += 1
+
+    if player_pos[0] != 0:
+        up = state_counts[player_pos[0] - 1][player_pos[1]]
+    else:
+        up = -1
+    if player_pos[0] != 12:
+        down = state_counts[player_pos[0] + 1][player_pos[1]]
+    else:
+        down = -1
+    if player_pos[1] != 0:
+        left = state_counts[player_pos[0]][player_pos[1] - 1]
+    else:
+        left = -1
+    if player_pos[1] != 12:
+        right = state_counts[player_pos[0]][player_pos[1] + 1]
+    else:
+        right = -1
+
+    return np.concatenate((player_view, [up, left, state_counts[player_pos[0]][player_pos[1]], right, down])), state_counts
+    # return np.concatenate((player_pos, goal_pos, cropped_chars))
+
+def reached_new_position(state, state_counts):
+    cropped_chars = state[OBSERVATION_KEYS[0]][5:18, 32:45]
+    player_pos = np.where(cropped_chars == PLAYER_ID)#the coordinates of the agent
+    player_pos = [player_pos[0][0], player_pos[1][0]]
+
+    return state_counts[player_pos[0]][player_pos[1]] == 0
     
 
 #PPO functions
@@ -139,11 +187,12 @@ def ppo_update(actor_critic, policy_optimizer, states, action_log_probs, actions
 
 
 #performance testing + video display/recording
-def test_policy(env, actor_critic, savedir, deterministic=True):
+def test_policy(env, actor_critic, savedir, test_num, deterministic=True):
     reward_sum = 0.0
     raw_state = env.reset()
-    PIXEL_HISTORY = [raw_state["pixel"][30:310, 490:770]]
-    state = process_observations(raw_state)
+    PIXEL_HISTORY = [raw_state["pixel"][70:300, 500:730]]
+    state_counts = np.zeros((13, 13))
+    state, state_counts = process_observations(raw_state, state_counts)
     while True:
         state = torch.FloatTensor(state).unsqueeze(0)
         action_distribution, _ = actor_critic(state)
@@ -154,15 +203,18 @@ def test_policy(env, actor_critic, savedir, deterministic=True):
             chosen_action = action_distribution.sample().cpu().numpy()
 
         next_state, reward, terminated, truncated, _ = env.step(chosen_action)
-        PIXEL_HISTORY.append(next_state["pixel"][30:310, 490:770])
+        PIXEL_HISTORY.append(next_state["pixel"][70:300, 500:730])
+
+        if (not (terminated or truncated)) and reached_new_position(next_state, state_counts):
+            reward += NEW_POS_REWARD
         reward_sum += reward
 
         if terminated or truncated:
             break
-        state = process_observations(next_state)
+        state, state_counts = process_observations(next_state, state_counts)
     
     if reward_sum >= TARGET_REWARD:
-        print("Targer reward reached! Saving video...")
+        print("Saving video...")
         fig = plt.figure()
         plt.title(ENVIRONMENT_NAME)
         plt.axis("off")
@@ -171,9 +223,10 @@ def test_policy(env, actor_critic, savedir, deterministic=True):
             frame.set_data(PIXEL_HISTORY[i])
             return [frame]
         animation = FuncAnimation(fig, update_animation_frame, frames=len(PIXEL_HISTORY), interval=500)
-        plt.show()
-        animation.save(savedir + ".gif", dpi=300, writer=PillowWriter(fps=10))
-        print("Video saved to path: " + savedir + ".gif")
+        # plt.show()
+        animation.save(savedir + "_%d.gif" % test_num, dpi=300, writer=PillowWriter(fps=10))
+        print("Video saved to path: " + savedir + "_%d.gif" % test_num)
+        plt.close(fig)
     
     return reward_sum
 
@@ -199,14 +252,16 @@ if __name__ == "__main__":
     
     #initialize minihack environments
     training_env = gym.make(ENVIRONMENT_NAME, new_step_api=True, actions=ACTION_KEYS, observation_keys=OBSERVATION_KEYS, 
-        penalty_time=PENALTY_TIME, penalty_step=PENALTY_STEP, reward_win=REWARD_WIN, reward_lose=REWARD_LOSE)
+        penalty_time=PENALTY_TIME, penalty_step=PENALTY_STEP, reward_win=REWARD_WIN, reward_lose=REWARD_LOSE, obs_crop_w=OBS_CROP, obs_crop_h=OBS_CROP)
     test_env = gym.make(ENVIRONMENT_NAME, new_step_api=True, actions=ACTION_KEYS, observation_keys=TEST_OBSERVATION_KEYS, 
-        penalty_time=PENALTY_TIME, penalty_step=PENALTY_STEP, reward_win=REWARD_WIN, reward_lose=REWARD_LOSE)
+        penalty_time=PENALTY_TIME, penalty_step=PENALTY_STEP, reward_win=REWARD_WIN, reward_lose=REWARD_LOSE, obs_crop_w=OBS_CROP, obs_crop_h=OBS_CROP)
     training_env.seed(42)
     test_env.seed(42)
 
+    state_counts = np.zeros((13, 13))
+
     #determine neural network input layer sizes based on the processing performed on the observations, and number of available actions
-    state = process_observations(training_env.reset())
+    state, state_counts = process_observations(training_env.reset(), state_counts)
     num_observations = state.shape[0]
     num_actions = training_env.action_space.n
 
@@ -238,6 +293,9 @@ if __name__ == "__main__":
 
             next_state, reward, terminated, truncated, _ = training_env.step(chosen_action.cpu().numpy())
             action_log_probs = action_distributions.log_prob(chosen_action)
+
+            if (not (terminated or truncated)) and reached_new_position(next_state, state_counts):
+                reward += NEW_POS_REWARD
             
             state_history.append(state)
             state_value_history.append(state_value)
@@ -247,11 +305,14 @@ if __name__ == "__main__":
             terminal_mask_history.append(1 - terminated)
 
             if terminated or truncated:
-                state = process_observations(training_env.reset())
+                state_counts = np.zeros((13, 13))
+                state, state_counts = process_observations(training_env.reset(), state_counts)
             else:
-                state = process_observations(next_state)
+                state, state_counts = process_observations(next_state, state_counts)
 
             num_timesteps += 1
+
+        state_counts = np.zeros((13, 13))
 
         #gae calculation
         state = torch.FloatTensor(state).to(device)
@@ -274,18 +335,20 @@ if __name__ == "__main__":
 
         #determine policy performance in test env
         if num_ppo_epochs % TESTING_INTERVAL == 0:
-            test_reward = test_policy(test_env, actor_critic, ENVIRONMENT_NAME + "/videos/" + RUN_DIR + "/" + str(num_ppo_epochs))
+            test_rewards = [test_policy(test_env, actor_critic, ENVIRONMENT_NAME + "/videos/" + RUN_DIR + "/" + str(num_ppo_epochs), i) for i in range(NUM_TESTS)]
+            average_reward = np.mean(test_rewards)
 
-            print("After %d PPO epochs got reward of %.3f" % (num_ppo_epochs, test_reward))
-            writer.add_scalar(ENVIRONMENT_NAME + "/test-reward", test_reward, num_ppo_epochs)
+            print("After %d PPO epochs got reward of %.3f" % (num_ppo_epochs, average_reward))
+            writer.add_scalar(ENVIRONMENT_NAME + "/test-reward", average_reward, num_ppo_epochs)
 
-            if best_reward < test_reward:
-                best_reward = test_reward
+            if best_reward < average_reward:
+                best_reward = average_reward
                 best_checkpoint = "%d_%d" % (num_ppo_epochs, best_reward)
                 torch.save(actor_critic.state_dict(), ENVIRONMENT_NAME + "/checkpoints/" + RUN_DIR + "/" + best_checkpoint + ".dat")
                 print("New best policy saved.")
                 
-            if test_reward >= TARGET_REWARD:
+            if average_reward >= TARGET_REWARD:
+                print("Target reward reached!")
                 break
             elif num_ppo_epochs >= MAX_PPO_EPOCHS:
                 print("Max number of PPO epochs reached.")
