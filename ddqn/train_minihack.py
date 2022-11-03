@@ -17,6 +17,7 @@ def train_agent(env,agent,save_agent=False, env_name = "", agent_name="default",
     episode_rewards = [0.0]
     losses=[]
 
+    obs_type = 'chars_crop'
     state = env.reset()[obs_type]
 
     # lava_count = 0
@@ -150,28 +151,6 @@ def test_agent(test_env,agent,record=False,fname='recent'):
     
 if __name__== '__main__':
 
-	# class IdleEvent(minihack.reward_manager.Event):
-	#     def __init__(self, reward: float, repeatable: bool, terminal_required: bool, terminal_sufficient: bool):
-	#         super().__init__(reward, repeatable, terminal_required, terminal_sufficient)
-
-	#     def check(self, env, previous_observation, action, observation) -> float:
-	#         # blank spots are 32
-	#         # agent is 64
-	#         # agent spawn point is 60
-	#         # pathways are 35
-	#         # obs[1] is the char observation 
-	#         # print("+++++++++++++++++++\nobs = \n++++++++++++++++++++++\n", observation[1])
-	# #         current = sum(np.count_nonzero(i == 35) for i in observation[0])
-	# #         current += sum(np.count_nonzero(i == 60) for i in observation[0])
-	# #         prev = sum(np.count_nonzero(i == 35) for i in previous_observation[0])
-	# #         prev += sum(np.count_nonzero(i == 60) for i in previous_observation[0])
-	#         current = observation[0]
-	#         prev = previous_observation[0]
-	#         if current > prev:
-	#             return self.reward
-	#         else:
-	#             return 0
-
 	hyper_params = {
 	    "seed": 42,  # which seed to use
 	    "room-env": "MiniHack-Room-Random-15x15-v0",  # for room task
@@ -197,14 +176,16 @@ if __name__== '__main__':
 	np.random.seed(hyper_params["seed"])
 	random.seed(hyper_params["seed"])
 
-	ACTIONS = tuple(nethack.CompassDirection)#+(
-	#     nethack.Command.PICKUP,
-	#     nethack.Command.APPLY,
-	#     nethack.Command.ZAP,
-	#     nethack.Command.WEAR,
-	# #     nethack.Command.PUTON,
-	#     nethack.Command.QUAFF,
-	#     nethack.Command.FIRE)
+	NAV_ACTIONS = tuple(nethack.CompassDirection)
+	SKILL_ACTIONS = {'lava-env':(nethack.Command.QUAFF,nethack.Command.FIRE),
+		        'quest-env': (nethack.Command.PICKUP,
+		                        nethack.Command.APPLY,
+		                        nethack.Command.ZAP,
+		                        nethack.Command.WEAR,
+		                        nethack.Command.PUTON,
+		                        nethack.Command.QUAFF,
+		                        nethack.Command.FIRE),                
+		        }
 
 	# reward_manager = RewardManager()
 	# reward_manager.add_kill_event("minotaur", reward=1, terminal_required=False)
@@ -215,33 +196,36 @@ if __name__== '__main__':
 	# strings.append("It's solid stone.")
 	# reward_manager.add_message_event("It's solid stone.", reward=-0.5, terminal_required=False, repeatable=True)
 
-	# reward_manager.add_event(ExploreEvent(0.5, True, True, False))
+	# reward_manager.add_event(IdleEvent(0.5, True, True, False))
+	
 	rand_nums = np.random.randint(1000,size=3)
-	obs_type = 'chars_crop'
-	env = gym.make(hyper_params['maze-env'],
-			observation_keys = [obs_type,'message'],
-	#                 obs_crop_w=15,
-	#                 penalty_time=-0.01,
-	#                 penalty_step=-0.1,
-			reward_lose=-1,
-			reward_win=1,
-			seeds = [42],
-	#                 reward_manager=reward_manager,
-			actions = ACTIONS)
+	observations = ['chars_crop','message']
+	env_name = 'maze' #options: room/lava/maze/questE/questH
+	env = gym.make(hyper_params[f'{env_name}-env'],
+                observation_keys = observations,
+#                 obs_crop_w=15,
+#                 penalty_time=-0.01,
+#                 penalty_step=-0.1,
+                reward_lose=-1,
+                reward_win=1,
+                seeds = rand_nums,
+#                 reward_manager=reward_manager,
+                actions = NAV_ACTIONS)
 
 	replay_buffer = ReplayBuffer(hyper_params["replay-buffer-size"])
 
 	agent = DQNAgent(np.prod(env.observation_space[obs_type].shape), env.action_space.n,replay_buffer, hyper_params["use-double-dqn"],hyper_params["learning-rate"],hyper_params["batch-size"],hyper_params["discount-factor"])
 
-	train_agent(env,agent,save_agent=True,env_name ="maze", write_stats=True)
-	test_env = gym.make(hyper_params['maze-env'],
-                    observation_keys = ['chars_crop','message','pixel'],
+	train_agent(env,agent,save_agent=True,env_name =env_name, write_stats=True)
+	
+	test_env = gym.make(hyper_params[f'{env_name}-env'],
+                    observation_keys = observations +['pixel'],
                     reward_lose=-1,
                     reward_win=1,
                     seeds = [42],
     #                 reward_manager=reward_manager,
                     actions = ACTIONS)
-	agent.load_agent('default')
+	agent.load_model('default')
 	
 	_ =test_agent(test_env,agent,record=True)
 

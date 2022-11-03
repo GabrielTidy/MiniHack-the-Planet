@@ -95,8 +95,6 @@ class DQNAgent:
         
     def save_model(self,fname):
         torch.save(self.model.state_dict(),fname)
-#         torch.save(self.target_model.state_dict(), f'Target network {env_name}')
         
     def load_model(self,fname):
         self.model.load_state_dict(torch.load(fname))
-#         self.target_model.load_state_dict(torch.load(f'Target network {env_name}'))
