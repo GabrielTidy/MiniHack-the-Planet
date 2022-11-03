@@ -15,7 +15,7 @@ from matplotlib.animation import FuncAnimation, PillowWriter
 ### Hyperparameters ###
 
 #nethack minhack environment
-ENVIRONMENT_NAME = "MiniHack-MazeWalk-Mapped-15x15-v0"
+ENVIRONMENT_NAME = "MiniHack-MazeWalk-15x15-v0"
 OBSERVATION_KEYS = ("chars", "chars_crop")
 TEST_OBSERVATION_KEYS = ("chars", "chars_crop", "pixel")
 OBS_CROP = 3
@@ -27,13 +27,12 @@ ACTION_KEYS = (nethack.CompassDirection.N,
 #environment rewards
 PENALTY_STEP = -1.0
 PENALTY_TIME = 0.0
-REWARD_WIN = 10
+REWARD_WIN = 20
 REWARD_LOSE = -10
-NEW_POS_REWARD = 1.0
+NEW_POS_REWARD = 2.5
 
 #character IDs of elements used in observation processing
 PLAYER_ID = 64
-GOAL_ID = 62
 
 #neural networks
 LEARNING_RATE = 1e-4
@@ -57,29 +56,22 @@ MAX_PPO_EPOCHS = 5000
 #policy testing
 TESTING_INTERVAL = 10
 NUM_TESTS = 3
-TARGET_REWARD = REWARD_WIN
+TARGET_REWARD = REWARD_WIN + 15
 
 ### End Hyperparameters ###
 
 
 #environment observation processing
 def process_observations(state, state_counts):
-    # cropped_chars = state[OBSERVATION_KEYS[0]][5:18, 32:45].flatten()
     cropped_chars = state[OBSERVATION_KEYS[0]][5:18, 32:45]
 
     player_pos = np.where(cropped_chars == PLAYER_ID)#the coordinates of the agent
     player_pos = [player_pos[0][0], player_pos[1][0]]
 
-    # player_pos = np.where(state[OBSERVATION_KEYS[0]] == PLAYER_ID)#the coordinates of the agent
-    # player_pos = [player_pos[0][0], player_pos[1][0]]
+    player_view = state[OBSERVATION_KEYS[1]].flatten()#3x3 window around the agents current position
 
-    # goal_pos = np.where(state[OBSERVATION_KEYS[0]] == GOAL_ID)#the coordinates of the exit staircase
-    # goal_pos = [goal_pos[0][0], goal_pos[1][0]]
-
-    player_view = state[OBSERVATION_KEYS[1]].flatten()
-
+    #the number of times the agent has reached its current position, as well as the 4 positions directly above, below, right and left of the current position
     state_counts[player_pos[0]][player_pos[1]] += 1
-
     if player_pos[0] != 0:
         up = state_counts[player_pos[0] - 1][player_pos[1]]
     else:
@@ -98,8 +90,8 @@ def process_observations(state, state_counts):
         right = -1
 
     return np.concatenate((player_view, [up, left, state_counts[player_pos[0]][player_pos[1]], right, down])), state_counts
-    # return np.concatenate((player_pos, goal_pos, cropped_chars))
 
+#when the agent reaches a brand new location in the maze, give a small positive reward for exploration
 def reached_new_position(state, state_counts):
     cropped_chars = state[OBSERVATION_KEYS[0]][5:18, 32:45]
     player_pos = np.where(cropped_chars == PLAYER_ID)#the coordinates of the agent
@@ -190,6 +182,32 @@ def ppo_update(actor_critic, policy_optimizer, states, action_log_probs, actions
 def test_policy(env, actor_critic, savedir, test_num, deterministic=True):
     reward_sum = 0.0
     raw_state = env.reset()
+    state_counts = np.zeros((13, 13))
+    state, state_counts = process_observations(raw_state, state_counts)
+    while True:
+        state = torch.FloatTensor(state).unsqueeze(0)
+        action_distribution, _ = actor_critic(state)
+
+        if deterministic:
+            chosen_action = torch.argmax(action_distribution.probs).cpu().numpy()
+        else:
+            chosen_action = action_distribution.sample().cpu().numpy()
+
+        next_state, reward, terminated, truncated, _ = env.step(chosen_action)
+
+        if (not (terminated or truncated)) and reached_new_position(next_state, state_counts):
+            reward += NEW_POS_REWARD
+        reward_sum += reward
+
+        if terminated or truncated:
+            break
+        state, state_counts = process_observations(next_state, state_counts)
+    
+    return reward_sum
+
+def record_policy(env, actor_critic, savedir, test_num, deterministic=True):
+    reward_sum = 0.0
+    raw_state = env.reset()
     PIXEL_HISTORY = [raw_state["pixel"][70:300, 500:730]]
     state_counts = np.zeros((13, 13))
     state, state_counts = process_observations(raw_state, state_counts)
@@ -213,20 +231,20 @@ def test_policy(env, actor_critic, savedir, test_num, deterministic=True):
             break
         state, state_counts = process_observations(next_state, state_counts)
     
-    if reward_sum >= TARGET_REWARD:
-        print("Saving video...")
-        fig = plt.figure()
-        plt.title(ENVIRONMENT_NAME)
-        plt.axis("off")
-        frame = plt.imshow(PIXEL_HISTORY[0])
-        def update_animation_frame(i):
-            frame.set_data(PIXEL_HISTORY[i])
-            return [frame]
-        animation = FuncAnimation(fig, update_animation_frame, frames=len(PIXEL_HISTORY), interval=500)
-        # plt.show()
-        animation.save(savedir + "_%d.gif" % test_num, dpi=300, writer=PillowWriter(fps=10))
-        print("Video saved to path: " + savedir + "_%d.gif" % test_num)
-        plt.close(fig)
+    # if reward_sum >= 15:
+    print("Saving video...")
+    fig = plt.figure()
+    plt.title(ENVIRONMENT_NAME)
+    plt.axis("off")
+    frame = plt.imshow(PIXEL_HISTORY[0])
+    def update_animation_frame(i):
+        frame.set_data(PIXEL_HISTORY[i])
+        return [frame]
+    animation = FuncAnimation(fig, update_animation_frame, frames=len(PIXEL_HISTORY), interval=500)
+    # plt.show()
+    animation.save(savedir + "_%d.gif" % test_num, dpi=300, writer=PillowWriter(fps=10))
+    print("Video saved to path: " + savedir + "_%d.gif" % test_num)
+    plt.close(fig)
     
     return reward_sum
 
@@ -349,6 +367,7 @@ if __name__ == "__main__":
                 
             if average_reward >= TARGET_REWARD:
                 print("Target reward reached!")
+                record_policy(test_env, actor_critic, ENVIRONMENT_NAME + "/videos/" + RUN_DIR + "/" + str(num_ppo_epochs), 0)
                 break
             elif num_ppo_epochs >= MAX_PPO_EPOCHS:
                 print("Max number of PPO epochs reached.")
