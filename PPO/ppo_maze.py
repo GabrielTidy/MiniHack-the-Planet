@@ -265,8 +265,7 @@ if __name__ == "__main__":
         os.mkdir(ENVIRONMENT_NAME + "/videos/" + RUN_DIR)
     writer = SummaryWriter(log_dir=ENVIRONMENT_NAME + "/checkpoints/" + RUN_DIR)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print("Using device:", device)
+    device = "cpu"
     
     #initialize minihack environments
     training_env = gym.make(ENVIRONMENT_NAME, new_step_api=True, actions=ACTION_KEYS, observation_keys=OBSERVATION_KEYS, 
