@@ -10,7 +10,7 @@ from matplotlib.animation import FuncAnimation, FFMpegWriter
 from agent import DQNAgent
 from replay_buffer import ReplayBuffer
 
-obs_type= 'chars_crop'
+obs_type= 'chars_crop' # state representation used to train and test agent
 
 def train_agent(env,agent,env_name, save_agent=True,agent_name="default", write_stats=False):
     global hyper_params
@@ -31,7 +31,7 @@ def train_agent(env,agent,env_name, save_agent=True,agent_name="default", write_
         )
         sample = random.random()
         
-        if sample<eps_threshold:
+        if sample<eps_threshold: #e-greedy policy
             action = env.action_space.sample()
         else:
             action = agent.act(state)
@@ -59,7 +59,7 @@ def train_agent(env,agent,env_name, save_agent=True,agent_name="default", write_
         agent.r_buffer.add(state,action,reward,n_state,float(done))
         state = n_state
 
-        last_action = action
+        last_action = action # for lavacross
 
 
         episode_rewards[-1] += reward
@@ -109,7 +109,8 @@ def train_agent(env,agent,env_name, save_agent=True,agent_name="default", write_
            header = 'loss',
            fmt ='%10.5f')
            
-def test_agent(test_env,agent,record=False,fname='recent'):
+#recording and evaluating trained agent
+def test_agent(test_env,agent,env_name,record=False):
 
     raw_state = test_env.reset()
     state = raw_state[obs_type]
@@ -134,13 +135,15 @@ def test_agent(test_env,agent,record=False,fname='recent'):
 
     if record:
         fig = plt.figure()
-        anim = plt.imshow(raw_state["pixel"])
+        plt.title(env_name)
+        plt.axis("off")
+        anim = plt.imshow(PIXEL_HISTORY[0])
         def update_animation_frame(i):
             anim.set_data(PIXEL_HISTORY[i])
             return [anim]
         ani = FuncAnimation(fig, update_animation_frame, frames=len(PIXEL_HISTORY), interval=500)
-        ani.save(f"{fname}.mp4", dpi=300, writer=FFMpegWriter(fps=1))
-
+        ani.save(f"{env_name}.mp4", dpi=300, writer=FFMpegWriter(fps=10))
+	plt.close()
         print("Video saved")
         
     return episode_rewards 
@@ -186,14 +189,16 @@ if __name__== '__main__':
                                 nethack.Command.FIRE), 
                 }
 
+	#rewards for quest-hard
 	reward_manager = RewardManager()
 	reward_manager.add_kill_event("minotaur", reward=5, terminal_required=False,terminal_sufficient=False)
 	reward_manager.add_message_event(["The door opens."], reward=3, terminal_required=True,terminal_sufficient=False, repeatable=True)
 	reward_manager.add_message_event(["Its solid stone."], reward=-0.5, terminal_required=True,terminal_sufficient=False, repeatable=True)
 
-	rand_nums = np.random.randint(1000,size=3)
+	#rand_nums = np.random.randint(1000,size=3) # environment seeds for generalization
 	observations = [obs_type,'message']
 	env_name = 'questH' #select: room/maze/lava/questH
+	
 	env = gym.make(hyper_params[f'{env_name}-env'],
                 observation_keys = observations,
                 penalty_time=-0.01,
@@ -202,7 +207,7 @@ if __name__== '__main__':
                 reward_win=10,
                 seeds = [hyper_params["seed"]],
                 reward_manager=reward_manager,
-                actions = NAV_ACTIONS+SKILL_ACTIONS[f'{env_name}-env'])
+                actions = NAV_ACTIONS+SKILL_ACTIONS[f'{env_name}-env']) 
 
 	replay_buffer = ReplayBuffer(hyper_params["replay-buffer-size"])
 
@@ -217,7 +222,7 @@ if __name__== '__main__':
                     seeds = [hyper_params["seed"]],
                   reward_manager=reward_manager,
                 actions = NAV_ACTIONS+SKILL_ACTIONS[f'{env_name}-env'])
-	agent.load_model('default')
+	agent.load_model('default') #load trained agent, change 'default' to custom if agent name specified in training
 	
-	_ =test_agent(test_env,agent,record=True)
+	_ =test_agent(test_env,agent,hyper_params[f'{env_name}-env'],record=True)
 
